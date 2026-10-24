@@ -549,10 +549,10 @@ input[type=range]::-moz-range-thumb{width:16px;height:16px;border:0;border-radiu
   <div class="sheet narrow" role="dialog" aria-label="결과 카드">
     <div class="dhead"><h2 class="ttl" style="font-size:20px;margin:0">결과 카드</h2><button class="xbtn" id="shareClose" aria-label="닫기">✕</button></div>
     <img class="cardimg" id="cardImg" alt="이번 판 결과 카드">
-    <div class="note" id="shareNote">이미지를 우클릭하거나 길게 눌러서 저장할 수 있어요.</div>
+    <div class="note" id="shareNote">저장 버튼을 누르거나, 이미지를 길게 눌러 저장할 수 있어요.</div>
     <div class="sheetbtns">
-      <button class="btn ghost" id="copyText">텍스트 복사</button>
-      <button class="btn yel" id="copyImg">이미지 복사</button>
+      <button class="btn ghost" id="copyImg">이미지 복사</button>
+      <button class="btn yel" id="saveImg">이미지 저장</button>
     </div>
   </div>
 </div>
@@ -820,7 +820,7 @@ function renderSeats(newId){
   $("seats").innerHTML=layoutSeats(list).map(({p,x,y})=>{
     const top=y-40;
     seatPos[p.id]={x,y:top+29,avTop:top,avBottom:top+58};
-    const z = y<RING.cy ? Math.round(y) : 420+Math.round(y);
+    const z = 1000+Math.round(y);
     if(p.ghost) return `<div class="seat ghost" style="left:${x}px;top:${top}px;z-index:${z}">
       <button class="ghostbtn" data-new aria-label="참가자 추가">+</button><div class="plate">빈 자리</div></div>`;
     const st=p.status!=null?`<span class="stamp st${p.status}">${STATUS[p.status]}</span>`:"";
@@ -1026,6 +1026,7 @@ async function cook(){
     jiggle(); await showEvent(ev);
   }
   await sleep(T(200));
+  $("schip").textContent=`재료 ${potItems.length}개 · 비공개`;
   cook2("보글보글\n완성!","뚜껑을 열어 볼까요?");
   skipping=false; $("skipBtn").hidden=true;
   $("openBtn").hidden=false; SFX.pop();
@@ -1363,16 +1364,12 @@ async function makeCard(){
   cardCanvas=c;
   return c.toDataURL("image/png");
 }
-function cardText(){
-  return [`[Yami Nabe] ${potTitle()}`, ...summaryLines(), "",
-    ...players.map(p=>`${p.name} ${STATUS[p.status]} · 가져옴: ${p.items.map(x=>x.name).join(", ")} · 먹음: ${p.eaten.map(x=>x.name).join(", ")||"없음"}`)].join("\n");
-}
 async function openShare(){
   SFX.click();
   $("shareNote").textContent="카드를 만드는 중…";
   $("shareScrim").classList.remove("out");
   $("cardImg").src=await makeCard();
-  $("shareNote").textContent="이미지를 우클릭하거나 길게 눌러서 저장할 수 있어요.";
+  $("shareNote").textContent="저장 버튼을 누르거나, 이미지를 길게 눌러 저장할 수 있어요.";
 }
 
 // ===== fullscreen =====
@@ -1421,7 +1418,7 @@ $("photoIn").addEventListener("change",e=>{const f=e.target.files[0];if(f)readPh
 $("photoClr").addEventListener("click",()=>{draft.photo=null;renderDraft()});
 $("saveBtn").addEventListener("click",saveDraft);
 $("delBtn").addEventListener("click",()=>{if(editing!=null)removePlayer(editing)});
-$("nameIn").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();saveDraft()}});
+$("nameIn").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.isComposing&&e.keyCode!==229){e.preventDefault();saveDraft()}});
 function onPeopleClick(e){
   if(phase!=="setup") return;
   const k=e.target.closest("[data-kick]"); if(k){removePlayer(+k.dataset.kick);return}
@@ -1439,9 +1436,31 @@ $("againBtn").addEventListener("click",cook);
 $("editBtn").addEventListener("click",()=>{SFX.click();goSetup()});
 $("shareBtn").addEventListener("click",openShare);
 $("shareClose").addEventListener("click",()=>{SFX.click();$("shareScrim").classList.add("out")});
-$("copyText").addEventListener("click",()=>{
-  navigator.clipboard?.writeText(cardText()).then(()=>$("shareNote").textContent="결과 텍스트를 복사했어요.")
-    .catch(()=>$("shareNote").textContent="복사가 막혀 있어요. 이미지를 우클릭해서 저장해 주세요.");
+// 이미지 저장: claude.ai 안에서는 downloads 기능으로, 파일로 열었을 때는 일반 다운로드로
+const dlCap = window.claude && window.claude.use ? window.claude.use("downloads").catch(()=>null) : Promise.resolve(null);
+function cardFileName(){const d=new Date();return `yami-nabe-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}.png`;}
+$("saveImg").addEventListener("click",async()=>{
+  if(!cardCanvas) return;
+  SFX.click();
+  const note=$("shareNote"), name=cardFileName();
+  const blob=await new Promise(res=>cardCanvas.toBlob(res,"image/png"));
+  if(!blob){ note.textContent="이미지를 만들지 못했어요. 카드를 다시 열어 주세요."; return; }
+  const dl=await dlCap;
+  if(dl){
+    try{ await dl.save({filename:name,data:blob}); note.textContent="이미지를 저장했어요."; }
+    catch(e){
+      const c=e&&e.code;
+      note.textContent = c==="declined" ? "저장을 취소했어요."
+        : c==="rate_limited" ? "저장 창이 이미 열려 있어요. 잠시 후 다시 눌러 주세요."
+        : "여기서는 저장이 안 돼요. 이미지를 우클릭하거나 길게 눌러 저장해 주세요.";
+    }
+    return;
+  }
+  if(window.claude){ note.textContent="여기서는 저장이 안 돼요. 이미지를 우클릭하거나 길게 눌러 저장해 주세요."; return; }
+  const url=URL.createObjectURL(blob), a=document.createElement("a");
+  a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
+  note.textContent="이미지를 저장했어요. 다운로드 폴더를 확인해 보세요.";
 });
 $("copyImg").addEventListener("click",()=>{
   if(!cardCanvas||!window.ClipboardItem||!navigator.clipboard?.write){$("shareNote").textContent="이 환경에선 이미지 복사가 안 돼요. 이미지를 우클릭하거나 길게 눌러 저장해 주세요.";return;}
